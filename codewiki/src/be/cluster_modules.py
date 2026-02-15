@@ -1,4 +1,4 @@
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from collections import defaultdict
 import logging
 import traceback
@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 from codewiki.src.be.dependency_analyzer.models.core import Node
 from codewiki.src.be.llm_services import call_llm
+from codewiki.src.be.projection import ProjectionConfig
 from codewiki.src.be.utils import count_tokens
 from codewiki.src.config import Config
 from codewiki.src.be.prompt_template import format_cluster_prompt
@@ -47,18 +48,24 @@ def cluster_modules(
     config: Config,
     current_module_tree: dict[str, Any] = {},
     current_module_name: str = None,
-    current_module_path: List[str] = []
+    current_module_path: List[str] = [],
+    projection: Optional[ProjectionConfig] = None,
 ) -> Dict[str, Any]:
     """
     Cluster the potential core components into modules.
     """
+    # Saved grouping bypass
+    if projection and projection.saved_grouping:
+        return projection.saved_grouping
+
     potential_core_components, potential_core_components_with_code = format_potential_core_components(leaf_nodes, components)
 
     if count_tokens(potential_core_components_with_code) <= config.max_token_per_module:
         logger.debug(f"Skipping clustering for {current_module_name} because the potential core components are too few: {count_tokens(potential_core_components_with_code)} tokens")
         return {}
 
-    prompt = format_cluster_prompt(potential_core_components, current_module_tree, current_module_name)
+    grouping_directive = projection.clustering_goal if projection else None
+    prompt = format_cluster_prompt(potential_core_components, current_module_tree, current_module_name, grouping_directive=grouping_directive)
     response = call_llm(prompt, config, model=config.cluster_model)
 
     #parse the response
@@ -107,7 +114,7 @@ def cluster_modules(
         
         current_module_path.append(module_name)
         module_info["children"] = {}
-        module_info["children"] = cluster_modules(valid_sub_leaf_nodes, components, config, current_module_tree, module_name, current_module_path)
+        module_info["children"] = cluster_modules(valid_sub_leaf_nodes, components, config, current_module_tree, module_name, current_module_path, projection=projection)
         current_module_path.pop()
 
     return module_tree

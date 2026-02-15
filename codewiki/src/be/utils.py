@@ -1,6 +1,7 @@
+import os
 import re
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 import logging
 import tiktoken
 import traceback
@@ -19,6 +20,45 @@ def is_complex_module(components: dict[str, any], core_component_ids: list[str])
             files.add(components[component_id].file_path)
 
     result = len(files) > 1
+
+    return result
+
+
+# ------------------------------------------------------------
+# ------------ Supplementary File Filtering -----------------
+# ------------------------------------------------------------
+
+
+def filter_supplementary_for_module(
+    all_files: Dict[str, str],
+    module_component_paths: list[str],
+) -> Dict[str, str]:
+    """Filter supplementary files to those relevant to a module.
+
+    Includes files in same directory subtree as module's code files,
+    plus top-level (root) configuration files.
+    """
+    if not all_files:
+        return {}
+
+    # Get directory prefixes from module's code files
+    module_dirs = set()
+    for path in module_component_paths:
+        dir_path = os.path.dirname(path)
+        if dir_path:
+            module_dirs.add(dir_path)
+
+    result = {}
+    for path, content in all_files.items():
+        # Root-level files always included
+        if os.sep not in path and "/" not in path:
+            result[path] = content
+            continue
+        # Check if file is in module's directory subtree
+        for module_dir in module_dirs:
+            if path.startswith(module_dir):
+                result[path] = content
+                break
 
     return result
 

@@ -63,6 +63,8 @@ class Config:
     max_token_per_leaf_module: int = DEFAULT_MAX_TOKEN_PER_LEAF_MODULE
     # Agent instructions for customization
     agent_instructions: Optional[Dict[str, Any]] = None
+    # Projection name or path (resolved externally into ProjectionConfig)
+    projection: Optional[str] = None
     
     @property
     def include_patterns(self) -> Optional[List[str]]:

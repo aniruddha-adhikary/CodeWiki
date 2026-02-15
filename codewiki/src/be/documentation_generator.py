@@ -1,7 +1,8 @@
+import glob
 import logging
 import os
 import json
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 from copy import deepcopy
 import traceback
 
@@ -16,6 +17,8 @@ from codewiki.src.be.prompt_template import (
     MODULE_OVERVIEW_PROMPT,
 )
 from codewiki.src.be.cluster_modules import cluster_modules
+from codewiki.src.be.projection import ProjectionConfig
+from codewiki.src.be.glossary_generator import generate_glossary, Glossary, render_glossary_md
 from codewiki.src.config import (
     Config,
     FIRST_MODULE_TREE_FILENAME,
@@ -26,14 +29,42 @@ from codewiki.src.utils import file_manager
 from codewiki.src.be.agent_orchestrator import AgentOrchestrator
 
 
+def collect_supplementary_files(repo_path: str, patterns: list[str]) -> dict[str, str]:
+    """Collect supplementary files matching glob patterns.
+
+    Returns dict mapping relative paths to file contents.
+    Caps individual files at 50KB. Skips binary files.
+    """
+    result = {}
+    for pattern in patterns:
+        full_pattern = os.path.join(repo_path, pattern)
+        for file_path in glob.glob(full_pattern, recursive=True):
+            if not os.path.isfile(file_path):
+                continue
+            rel_path = os.path.relpath(file_path, repo_path)
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read(50 * 1024)  # 50KB cap
+                if len(content) == 50 * 1024:
+                    content += "\n... [truncated]"
+                result[rel_path] = content
+            except (UnicodeDecodeError, IOError):
+                # Skip binary files and unreadable files
+                continue
+    return result
+
+
+
+
 class DocumentationGenerator:
     """Main documentation generation orchestrator."""
     
-    def __init__(self, config: Config, commit_id: str = None):
+    def __init__(self, config: Config, commit_id: str = None, projection: Optional[ProjectionConfig] = None):
         self.config = config
         self.commit_id = commit_id
+        self.projection = projection
         self.graph_builder = DependencyGraphBuilder(config)
-        self.agent_orchestrator = AgentOrchestrator(config)
+        self.agent_orchestrator = AgentOrchestrator(config, projection=projection)
     
     def create_documentation_metadata(self, working_dir: str, components: Dict[str, Any], num_leaf_nodes: int):
         """Create a metadata file with documentation generation information."""
@@ -56,7 +87,8 @@ class DocumentationGenerator:
                 "overview.md",
                 "module_tree.json",
                 "first_module_tree.json"
-            ]
+            ],
+            "projection": self.projection.name if self.projection else None
         }
         
         # Add generated markdown files to the metadata
@@ -268,13 +300,51 @@ class DocumentationGenerator:
                 module_tree = file_manager.load_json(first_module_tree_path)
             else:
                 logger.debug(f"Module tree not found at {module_tree_path}, clustering modules")
-                module_tree = cluster_modules(leaf_nodes, components, self.config)
+                module_tree = cluster_modules(leaf_nodes, components, self.config, projection=self.projection)
                 file_manager.save_json(module_tree, first_module_tree_path)
             
             file_manager.save_json(module_tree, module_tree_path)
-            
+
             logger.debug(f"Grouped components into {len(module_tree)} modules")
-            
+
+            # Collect supplementary files if projection defines patterns
+            if (
+                self.projection
+                and self.projection.supplementary_file_patterns
+            ):
+                supplementary = collect_supplementary_files(
+                    self.config.repo_path,
+                    self.projection.supplementary_file_patterns,
+                )
+                self.agent_orchestrator.supplementary_files = supplementary
+                logger.debug(
+                    f"Collected {len(supplementary)} supplementary files"
+                )
+
+            # Glossary generation / loading
+            if self.projection and "data_dictionary" in self.projection.output_artifacts:
+                glossary = generate_glossary(
+                    components, leaf_nodes, self.config,
+                    context=(
+                        self.agent_orchestrator.compiled.code_context_block
+                        if self.agent_orchestrator.compiled
+                        else ""
+                    ),
+                )
+                self.agent_orchestrator.glossary_block = glossary.to_prompt_block(max_entries=200)
+                file_manager.save_json(
+                    glossary.to_dict(), os.path.join(working_dir, "glossary.json")
+                )
+                file_manager.save_text(
+                    render_glossary_md(glossary), os.path.join(working_dir, "glossary.md")
+                )
+                logger.debug(f"Generated glossary with {len(glossary.entries)} entries")
+            elif self.projection and self.projection.glossary_path:
+                glossary_data = file_manager.load_json(self.projection.glossary_path)
+                glossary = Glossary.from_dict(glossary_data)
+                self.agent_orchestrator.glossary_block = glossary.to_prompt_block(max_entries=200)
+                logger.debug(f"Loaded glossary with {len(glossary.entries)} entries from {self.projection.glossary_path}")
+
             # Generate module documentation using dynamic programming approach
             # This processes leaf modules first, then parent modules
             working_dir = await self.generate_module_documentation(components, leaf_nodes)

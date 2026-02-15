@@ -1,14 +1,17 @@
-SYSTEM_PROMPT = """
-<ROLE>
-You are an AI documentation assistant. Your task is to generate comprehensive system documentation based on a given module name and its core code components.
-</ROLE>
-
-<OBJECTIVES>
+DEFAULT_OBJECTIVES = """\
 Create documentation that helps developers and maintainers understand:
 1. The module's purpose and core functionality
 2. Architecture and component relationships
-3. How the module fits into the overall system
-</OBJECTIVES>
+3. How the module fits into the overall system"""
+
+SYSTEM_PROMPT = """
+<ROLE>
+You are an AI documentation assistant. Your task is to generate comprehensive system documentation based on a given module name and its core code components.
+</ROLE>{code_context}{framework_context}
+
+<OBJECTIVES>
+{objectives}
+</OBJECTIVES>{glossary}
 
 <DOCUMENTATION_STRUCTURE>
 Generate documentation following this structure:
@@ -48,14 +51,11 @@ Generate documentation following this structure:
 LEAF_SYSTEM_PROMPT = """
 <ROLE>
 You are an AI documentation assistant. Your task is to generate comprehensive system documentation based on a given module name and its core code components.
-</ROLE>
+</ROLE>{code_context}{framework_context}
 
 <OBJECTIVES>
-Create a comprehensive documentation that helps developers and maintainers understand:
-1. The module's purpose and core functionality
-2. Architecture and component relationships
-3. How the module fits into the overall system
-</OBJECTIVES>
+{objectives}
+</OBJECTIVES>{glossary}
 
 <DOCUMENTATION_REQUIREMENTS>
 Generate documentation following the following requirements:
@@ -129,7 +129,7 @@ overview_content
 """.strip()
 
 CLUSTER_REPO_PROMPT = """
-Here is list of all potential core components of the repository (It's normal that some components are not essential to the repository):
+{grouping_strategy}Here is list of all potential core components of the repository (It's normal that some components are not essential to the repository):
 <POTENTIAL_CORE_COMPONENTS>
 {potential_core_components}
 </POTENTIAL_CORE_COMPONENTS>
@@ -166,7 +166,7 @@ Here is the module tree of a repository:
 {module_tree}
 </MODULE_TREE>
 
-Here is list of all potential core components of the module {module_name} (It's normal that some components are not essential to the module):
+{grouping_strategy}Here is list of all potential core components of the module {module_name} (It's normal that some components are not essential to the module):
 <POTENTIAL_CORE_COMPONENTS>
 {potential_core_components}
 </POTENTIAL_CORE_COMPONENTS>
@@ -219,6 +219,9 @@ EXTENSION_TO_LANGUAGE = {
     ".sh": "bash",
     ".json": "json",
     ".yaml": "yaml",
+    ".yml": "yaml",
+    ".xml": "xml",
+    ".properties": "properties",
     ".java": "java",
     ".js": "javascript",
     ".ts": "typescript",
@@ -228,12 +231,10 @@ EXTENSION_TO_LANGUAGE = {
     ".hpp": "cpp",
     ".tsx": "typescript",
     ".cc": "cpp",
-    ".hpp": "cpp",
     ".cxx": "cpp",
     ".jsx": "javascript",
     ".mjs": "javascript",
     ".cjs": "javascript",
-    ".jsx": "javascript",
     ".cs": "csharp",
     ".php": "php",
     ".phtml": "php",
@@ -241,34 +242,37 @@ EXTENSION_TO_LANGUAGE = {
 }
 
 
-def format_user_prompt(module_name: str, core_component_ids: list[str], components: Dict[str, Any], module_tree: dict[str, any]) -> str:
+def format_user_prompt(module_name: str, core_component_ids: list[str], components: Dict[str, Any], module_tree: dict[str, any], supplementary_files: Dict[str, str] = None, supplementary_file_role: str = None) -> str:
     """
     Format the user prompt with module name and organized core component codes.
-    
+
     Args:
         module_name: Name of the module to document
         core_component_ids: List of component IDs to include
         components: Dictionary mapping component IDs to CodeComponent objects
-    
+        module_tree: Module tree structure
+        supplementary_files: Optional dict mapping file paths to their contents
+        supplementary_file_role: Optional description of the supplementary files' role
+
     Returns:
         Formatted user prompt string
     """
 
     # format module tree
     lines = []
-    
+
     def _format_module_tree(module_tree: dict[str, any], indent: int = 0):
         for key, value in module_tree.items():
             if key == module_name:
                 lines.append(f"{'  ' * indent}{key} (current module)")
             else:
                 lines.append(f"{'  ' * indent}{key}")
-            
+
             lines.append(f"{'  ' * (indent + 1)} Core components: {', '.join(value['components'])}")
             if isinstance(value["children"], dict) and len(value["children"]) > 0:
                 lines.append(f"{'  ' * (indent + 1)} Children:")
                 _format_module_tree(value["children"], indent + 2)
-    
+
     _format_module_tree(module_tree, 0)
     formatted_module_tree = "\n".join(lines)
 
@@ -289,25 +293,39 @@ def format_user_prompt(module_name: str, core_component_ids: list[str], componen
     for path, component_ids_in_file in grouped_components.items():
         core_component_codes += f"# File: {path}\n\n"
         core_component_codes += f"## Core Components in this file:\n"
-        
+
         for component_id in component_ids_in_file:
             core_component_codes += f"- {component_id}\n"
-        
+
         core_component_codes += f"\n## File Content:\n```{EXTENSION_TO_LANGUAGE['.'+path.split('.')[-1]]}\n"
-        
+
         # Read content of the file using the first component's file path
         try:
             core_component_codes += file_manager.load_text(components[component_ids_in_file[0]].file_path)
         except (FileNotFoundError, IOError) as e:
             core_component_codes += f"# Error reading file: {e}\n"
-        
+
         core_component_codes += "```\n\n"
-        
-    return USER_PROMPT.format(module_name=module_name, formatted_core_component_codes=core_component_codes, module_tree=formatted_module_tree)
+
+    result = USER_PROMPT.format(module_name=module_name, formatted_core_component_codes=core_component_codes, module_tree=formatted_module_tree)
+
+    if supplementary_files:
+        role = supplementary_file_role or "Configuration files relevant to this module:"
+        supplementary_block = f"\n\n<SUPPLEMENTARY_CONFIGURATION>\n{role}\n"
+        for path, content in supplementary_files.items():
+            ext = ""
+            if "." in path:
+                ext = "." + path.rsplit(".", 1)[-1]
+            lang = EXTENSION_TO_LANGUAGE.get(ext, "")
+            supplementary_block += f"\n## {path}\n```{lang}\n{content}\n```\n"
+        supplementary_block += "</SUPPLEMENTARY_CONFIGURATION>"
+        result += supplementary_block
+
+    return result
 
 
 
-def format_cluster_prompt(potential_core_components: str, module_tree: dict[str, any] = {}, module_name: str = None) -> str:
+def format_cluster_prompt(potential_core_components: str, module_tree: dict[str, any] = {}, module_name: str = None, grouping_directive: str = None) -> str:
     """
     Format the cluster prompt with potential core components and module tree.
     """
@@ -316,60 +334,97 @@ def format_cluster_prompt(potential_core_components: str, module_tree: dict[str,
     lines = []
 
     # print(f"Module tree:\n{json.dumps(module_tree, indent=2)}")
-    
+
     def _format_module_tree(module_tree: dict[str, any], indent: int = 0):
         for key, value in module_tree.items():
             if key == module_name:
                 lines.append(f"{'  ' * indent}{key} (current module)")
             else:
                 lines.append(f"{'  ' * indent}{key}")
-            
+
             lines.append(f"{'  ' * (indent + 1)} Core components: {', '.join(value['components'])}")
             if ("children" in value) and isinstance(value["children"], dict) and len(value["children"]) > 0:
                 lines.append(f"{'  ' * (indent + 1)} Children:")
                 _format_module_tree(value["children"], indent + 2)
-    
+
     _format_module_tree(module_tree, 0)
     formatted_module_tree = "\n".join(lines)
 
+    grouping_strategy = ""
+    if grouping_directive:
+        grouping_strategy = f"<GROUPING_STRATEGY>\n{grouping_directive}\n</GROUPING_STRATEGY>\n\n"
 
     if module_tree == {}:
-        return CLUSTER_REPO_PROMPT.format(potential_core_components=potential_core_components)
+        return CLUSTER_REPO_PROMPT.format(potential_core_components=potential_core_components, grouping_strategy=grouping_strategy)
     else:
-        return CLUSTER_MODULE_PROMPT.format(potential_core_components=potential_core_components, module_tree=formatted_module_tree, module_name=module_name)
+        return CLUSTER_MODULE_PROMPT.format(potential_core_components=potential_core_components, module_tree=formatted_module_tree, module_name=module_name, grouping_strategy=grouping_strategy)
 
 
-def format_system_prompt(module_name: str, custom_instructions: str = None) -> str:
+def format_system_prompt(module_name: str, custom_instructions: str = None,
+                         code_context: str = None, framework_context: str = None,
+                         objectives: str = None, glossary: str = None) -> str:
     """
-    Format the system prompt with module name and optional custom instructions.
-    
+    Format the system prompt with module name and optional context slots.
+
     Args:
         module_name: Name of the module to document
         custom_instructions: Optional custom instructions to append
-        
+        code_context: Optional pre-wrapped code context block (with XML tags)
+        framework_context: Optional pre-wrapped framework context block (with XML tags)
+        objectives: Optional objectives text (defaults to DEFAULT_OBJECTIVES)
+        glossary: Optional pre-wrapped glossary block (with XML tags)
+
     Returns:
         Formatted system prompt string
     """
+    code_context_section = f"\n\n{code_context}" if code_context else ""
+    framework_context_section = f"\n\n{framework_context}" if framework_context else ""
+    objectives_text = objectives if objectives else DEFAULT_OBJECTIVES
+    glossary_section = f"\n\n{glossary}" if glossary else ""
     custom_section = ""
     if custom_instructions:
         custom_section = f"\n\n<CUSTOM_INSTRUCTIONS>\n{custom_instructions}\n</CUSTOM_INSTRUCTIONS>"
-    
-    return SYSTEM_PROMPT.format(module_name=module_name, custom_instructions=custom_section).strip()
+
+    return SYSTEM_PROMPT.format(
+        module_name=module_name,
+        code_context=code_context_section,
+        framework_context=framework_context_section,
+        objectives=objectives_text,
+        glossary=glossary_section,
+        custom_instructions=custom_section,
+    ).strip()
 
 
-def format_leaf_system_prompt(module_name: str, custom_instructions: str = None) -> str:
+def format_leaf_system_prompt(module_name: str, custom_instructions: str = None,
+                              code_context: str = None, framework_context: str = None,
+                              objectives: str = None, glossary: str = None) -> str:
     """
-    Format the leaf system prompt with module name and optional custom instructions.
-    
+    Format the leaf system prompt with module name and optional context slots.
+
     Args:
         module_name: Name of the module to document
         custom_instructions: Optional custom instructions to append
-        
+        code_context: Optional pre-wrapped code context block (with XML tags)
+        framework_context: Optional pre-wrapped framework context block (with XML tags)
+        objectives: Optional objectives text (defaults to DEFAULT_OBJECTIVES)
+        glossary: Optional pre-wrapped glossary block (with XML tags)
+
     Returns:
         Formatted leaf system prompt string
     """
+    code_context_section = f"\n\n{code_context}" if code_context else ""
+    framework_context_section = f"\n\n{framework_context}" if framework_context else ""
+    objectives_text = objectives if objectives else DEFAULT_OBJECTIVES
+    glossary_section = f"\n\n{glossary}" if glossary else ""
     custom_section = ""
     if custom_instructions:
         custom_section = f"\n\n<CUSTOM_INSTRUCTIONS>\n{custom_instructions}\n</CUSTOM_INSTRUCTIONS>"
-    
-    return LEAF_SYSTEM_PROMPT.format(module_name=module_name, custom_instructions=custom_section).strip()
+
+    return LEAF_SYSTEM_PROMPT.format(
+        module_name=module_name,
+        code_context=code_context_section,
+        framework_context=framework_context_section,
+        objectives=objectives_text,
+        glossary=glossary_section,
+        custom_instructions=custom_section,
+    ).strip()

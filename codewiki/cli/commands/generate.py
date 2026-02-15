@@ -126,6 +126,30 @@ def parse_patterns(patterns_str: str) -> List[str]:
     default=None,
     help="Maximum depth for hierarchical decomposition (overrides config)",
 )
+@click.option(
+    "--projection",
+    "-p",
+    type=str,
+    default=None,
+    help="Projection name (developer, business, ejb-migration, natural-transpiled) or path to JSON",
+)
+@click.option(
+    "--load-grouping",
+    type=click.Path(exists=True),
+    default=None,
+    help="Path to saved grouping JSON (requires --projection)",
+)
+@click.option(
+    "--generate-glossary",
+    is_flag=True,
+    help="Enable glossary / data dictionary generation",
+)
+@click.option(
+    "--load-glossary",
+    type=click.Path(exists=True),
+    default=None,
+    help="Path to pre-existing glossary JSON file",
+)
 @click.pass_context
 def generate_command(
     ctx,
@@ -142,7 +166,11 @@ def generate_command(
     max_tokens: Optional[int],
     max_token_per_module: Optional[int],
     max_token_per_leaf_module: Optional[int],
-    max_depth: Optional[int]
+    max_depth: Optional[int],
+    projection: Optional[str],
+    load_grouping: Optional[str],
+    generate_glossary: bool,
+    load_glossary: Optional[str],
 ):
     """
     Generate comprehensive documentation for a code repository.
@@ -240,8 +268,39 @@ def generate_command(
             else:
                 logger.warning("Not a git repository. Git features unavailable.")
         
+        # Resolve projection
+        resolved_projection = None
+        if projection:
+            from codewiki.src.be.projection import resolve_projection
+            try:
+                resolved_projection = resolve_projection(projection)
+            except ValueError as e:
+                raise ConfigurationError(str(e))
+
+            if load_grouping:
+                import json
+                with open(load_grouping, 'r') as f:
+                    resolved_projection.saved_grouping = json.load(f)
+                if verbose:
+                    logger.debug(f"Loaded saved grouping from {load_grouping}")
+
+            if generate_glossary:
+                if "data_dictionary" not in resolved_projection.output_artifacts:
+                    resolved_projection.output_artifacts.append("data_dictionary")
+
+            if load_glossary:
+                resolved_projection.glossary_path = load_glossary
+
+            if verbose:
+                logger.debug(f"Using projection: {resolved_projection.name}")
+        elif load_grouping:
+            raise ConfigurationError("--load-grouping requires --projection to be specified")
+
         # Validate output directory
         output_dir = Path(output).expanduser().resolve()
+        # Adjust output dir for projection subdirectory
+        if resolved_projection:
+            output_dir = output_dir / resolved_projection.name
         check_writable_output(output_dir.parent)
         
         logger.success(f"Output directory: {output_dir}")
@@ -361,7 +420,8 @@ def generate_command(
                 'max_depth': max_depth if max_depth is not None else config.max_depth,
             },
             verbose=verbose,
-            generate_html=github_pages
+            generate_html=github_pages,
+            projection=resolved_projection,
         )
         
         # Run generation

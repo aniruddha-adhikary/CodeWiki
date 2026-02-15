@@ -20,6 +20,7 @@ from codewiki.cli.utils.errors import APIError
 
 # Import backend modules
 from codewiki.src.be.documentation_generator import DocumentationGenerator
+from codewiki.src.be.projection import ProjectionConfig
 from codewiki.src.config import Config as BackendConfig, set_cli_context
 
 
@@ -37,23 +38,26 @@ class CLIDocumentationGenerator:
         output_dir: Path,
         config: Dict[str, Any],
         verbose: bool = False,
-        generate_html: bool = False
+        generate_html: bool = False,
+        projection: "ProjectionConfig | None" = None,
     ):
         """
         Initialize the CLI documentation generator.
-        
+
         Args:
             repo_path: Repository path
             output_dir: Output directory
             config: LLM configuration
             verbose: Enable verbose output
             generate_html: Whether to generate HTML viewer
+            projection: Optional projection configuration
         """
         self.repo_path = repo_path
         self.output_dir = output_dir
         self.config = config
         self.verbose = verbose
         self.generate_html = generate_html
+        self.projection = projection
         self.progress_tracker = ProgressTracker(total_stages=5, verbose=verbose)
         self.job = DocumentationJob()
         
@@ -176,7 +180,7 @@ class CLIDocumentationGenerator:
             self.progress_tracker.update_stage(0.2, "Initializing dependency analyzer...")
         
         # Create documentation generator
-        doc_generator = DocumentationGenerator(backend_config)
+        doc_generator = DocumentationGenerator(backend_config, projection=self.projection)
         
         if self.verbose:
             self.progress_tracker.update_stage(0.5, "Parsing source files...")
@@ -213,7 +217,7 @@ class CLIDocumentationGenerator:
             if os.path.exists(first_module_tree_path):
                 module_tree = file_manager.load_json(first_module_tree_path)
             else:
-                module_tree = cluster_modules(leaf_nodes, components, backend_config)
+                module_tree = cluster_modules(leaf_nodes, components, backend_config, projection=self.projection)
                 file_manager.save_json(module_tree, first_module_tree_path)
             
             file_manager.save_json(module_tree, module_tree_path)

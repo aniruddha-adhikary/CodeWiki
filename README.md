@@ -11,13 +11,14 @@
 <p align="center">
   <a href="https://python.org/"><img alt="Python version" src="https://img.shields.io/badge/python-3.12+-blue?style=flat-square" /></a>
   <a href="./LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/License-MIT-green.svg?style=flat-square" /></a>
-  <a href="https://github.com/FSoft-AI4Code/CodeWiki/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/FSoft-AI4Code/CodeWiki?style=flat-square" /></a>
+  <a href="https://github.com/aniruddha-adhikary/CodeWiki/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/aniruddha-adhikary/CodeWiki?style=flat-square" /></a>
   <a href="https://arxiv.org/abs/2510.24428"><img alt="arXiv" src="https://img.shields.io/badge/arXiv-2510.24428-b31b1b?style=flat-square" /></a>
 </p>
 
 <p align="center">
   <a href="#quick-start"><strong>Quick Start</strong></a> •
   <a href="#cli-commands"><strong>CLI Commands</strong></a> •
+  <a href="#projection-framework"><strong>Projections</strong></a> •
   <a href="#documentation-output"><strong>Output Structure</strong></a> •
   <a href="https://arxiv.org/abs/2510.24428"><strong>Paper</strong></a>
 </p>
@@ -34,7 +35,7 @@
 
 ```bash
 # Install from source
-pip install git+https://github.com/FSoft-AI4Code/CodeWiki.git
+pip install git+https://github.com/aniruddha-adhikary/CodeWiki.git
 
 # Verify installation
 codewiki --version
@@ -155,6 +156,74 @@ codewiki generate --focus "src/core,src/api" --doc-type architecture
 codewiki generate --instructions "Focus on public APIs and include usage examples"
 ```
 
+### Projection Framework
+
+Projections let you generate different documentation views for different audiences from the same codebase. Each projection controls how modules are grouped, what the documentation focuses on, and what level of technical detail is included.
+
+#### Built-in Projections
+
+| Projection | Audience | Description |
+|------------|----------|-------------|
+| `developer` | Developers & maintainers | Standard code-structure documentation (default) |
+| `business` | Product managers & business analysts | Business capability documentation, no code details |
+| `ejb-migration` | Migration engineers | EJB application docs with XML config context for migration planning |
+| `natural-transpiled` | Reimplementation engineers | Recovers original NATURAL logic from transpiled Java code |
+
+```bash
+# Generate business-oriented documentation
+codewiki generate --projection business
+
+# EJB migration docs (auto-includes ejb-jar.xml, web.xml, etc.)
+codewiki generate --projection ejb-migration --include "*.java"
+
+# NATURAL-transpiled docs with glossary of business terms
+codewiki generate --projection natural-transpiled --generate-glossary
+
+# Load a previously generated glossary instead of re-generating
+codewiki generate --projection natural-transpiled --load-glossary ./glossary.json
+
+# Reuse a saved module grouping from a previous run
+codewiki generate --projection business --load-grouping .codewiki/projections/business-grouping.json
+```
+
+#### Custom Projections
+
+Create a JSON file with your projection configuration and pass it directly:
+
+```bash
+# From a file path
+codewiki generate --projection ./my-projection.json
+
+# Or place it in .codewiki/projections/ and reference by name
+codewiki generate --projection my-projection
+```
+
+See the [Development Guide](DEVELOPMENT.md#projection-system) for the full `ProjectionConfig` field reference.
+
+#### Glossary / Data Dictionary
+
+The glossary feature uses an LLM to map code identifiers to business-friendly names and definitions. This is especially useful for transpiled or legacy codebases where variable names are cryptic.
+
+```bash
+# Generate a glossary alongside documentation
+codewiki generate --generate-glossary
+
+# Combine with a projection
+codewiki generate --projection business --generate-glossary
+
+# Reuse a previously generated glossary
+codewiki generate --load-glossary ./docs/business/glossary.json
+```
+
+Output files: `glossary.json` (structured) and `glossary.md` (human-readable table).
+
+| Option | Description | Example |
+|--------|-------------|---------|
+| `--projection`, `-p` | Projection name or path to JSON | `business`, `./custom.json` |
+| `--generate-glossary` | Generate a glossary / data dictionary | Flag |
+| `--load-glossary` | Load a pre-existing glossary JSON | `./glossary.json` |
+| `--load-grouping` | Load saved module grouping (requires `--projection`) | `./grouping.json` |
+
 #### Pattern Behavior (Important!)
 
 - **`--include`**: When specified, **ONLY** these patterns are used (replaces defaults completely)
@@ -269,6 +338,19 @@ Generated documentation includes both **textual descriptions** and **visual arti
 └── index.html               # Interactive viewer (with --github-pages)
 ```
 
+When using a projection, output goes into a subdirectory named after the projection:
+
+```
+./docs/
+└── business/                # Projection subdirectory
+    ├── overview.md
+    ├── *.md
+    ├── module_tree.json
+    ├── metadata.json
+    ├── glossary.json        # If --generate-glossary was used
+    └── glossary.md          # Human-readable glossary
+```
+
 ---
 
 ## Experimental Results
@@ -352,7 +434,7 @@ CodeWiki employs a three-stage process for comprehensive documentation generatio
 
 ## Citation
 
-If you use CodeWiki in your research, please cite:
+This project is a fork of the [original CodeWiki repository](https://github.com/FSoft-AI4Code/CodeWiki) by FSoft-AI4Code. If you use the original research in your work, please cite:
 
 ```bibtex
 @misc{hoang2025codewikievaluatingaisability,
@@ -366,16 +448,28 @@ If you use CodeWiki in your research, please cite:
 }
 ```
 
+To reference this fork (which adds the projection framework, glossary generation, and multi-audience documentation support):
+
+```bibtex
+@software{adhikary2026codewikiprojections,
+      title={CodeWiki Projections: Multi-Audience Documentation Generation for Large-Scale Codebases},
+      author={Aniruddha Adhikary},
+      year={2026},
+      url={https://github.com/aniruddha-adhikary/CodeWiki},
+      note={Fork of CodeWiki with projection framework, glossary generation, and multi-audience documentation support},
+}
+```
+
 ---
 
 ## Star History
 
 <p align="center">
-  <a href="https://star-history.com/#FSoft-AI4Code/CodeWiki&Date">
+  <a href="https://star-history.com/#aniruddha-adhikary/CodeWiki&Date">
    <picture>
-     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=FSoft-AI4Code/CodeWiki&type=Date&theme=dark" />
-     <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=FSoft-AI4Code/CodeWiki&type=Date" />
-     <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=FSoft-AI4Code/CodeWiki&type=Date" />
+     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=aniruddha-adhikary/CodeWiki&type=Date&theme=dark" />
+     <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=aniruddha-adhikary/CodeWiki&type=Date" />
+     <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=aniruddha-adhikary/CodeWiki&type=Date" />
    </picture>
   </a>
 </p>

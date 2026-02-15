@@ -11,7 +11,9 @@ codewiki/
 │   │   ├── commands/         # CLI commands (config, generate)
 │   │   ├── models/           # Data models
 │   │   ├── utils/            # Utilities
-│   │   └── adapters/         # External integrations
+│   │   ├── adapters/         # External integrations
+│   │   ├── interactive_grouping.py   # Interactive module grouping review
+│   │   └── interactive_glossary.py   # Interactive glossary review
 │   ├── src/                  # Web application
 │   │   ├── be/               # Backend (dependency analysis, agents)
 │   │   │   ├── agent_orchestrator.py
@@ -19,7 +21,9 @@ codewiki/
 │   │   │   ├── cluster_modules.py
 │   │   │   ├── dependency_analyzer/
 │   │   │   ├── documentation_generator.py
-│   │   │   └── llm_services.py
+│   │   │   ├── glossary_generator.py  # Glossary / data dictionary generation
+│   │   │   ├── llm_services.py
+│   │   │   └── projection.py          # Projection data model and built-in factories
 │   │   └── fe/               # Frontend (web interface)
 │   │       ├── web_app.py
 │   │       ├── routes.py
@@ -146,6 +150,70 @@ class AgentInstructions:
 4. **Dependency Analyzer** → Uses `include_patterns` and `exclude_patterns` for file filtering
 5. **Agent Orchestrator** → Injects `custom_instructions` into LLM prompts
 
+### Projection System
+
+Projections generate different documentation views for different audiences. A projection controls module clustering strategy, prompt objectives, framework context, glossary generation, and supplementary file inclusion.
+
+#### Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/be/projection.py` | `ProjectionConfig`, `CodeProvenance`, `CompiledProjectionPrompts`, built-in factories, resolver |
+| `src/be/prompt_template.py` | Template slots: `{code_context}`, `{framework_context}`, `{objectives}`, `{glossary}` |
+| `src/be/glossary_generator.py` | LLM-based identifier extraction and business term mapping |
+| `src/be/cluster_modules.py` | Projection-aware clustering with `clustering_goal` passthrough |
+| `cli/interactive_grouping.py` | Interactive module grouping review session |
+| `cli/interactive_glossary.py` | Interactive glossary review session |
+
+#### Data Flow
+
+```
+CLI --projection flag
+    → resolve_projection(name_or_path)
+    → ProjectionConfig
+    → compile_projection_instructions()
+    → CompiledProjectionPrompts
+        ├── code_context       → {code_context} slot in system prompt
+        ├── framework_context  → {framework_context} slot in system prompt
+        ├── objectives_override → {objectives} slot (replaces defaults)
+        ├── custom_instructions → {custom_instructions} slot
+        └── glossary_block     → {glossary} slot (set after generation)
+
+ProjectionConfig also drives:
+    ├── clustering_goal     → cluster_modules() grouping directive
+    ├── saved_grouping      → bypass clustering LLM call entirely
+    ├── supplementary_file_patterns → collect XML/YAML config files
+    └── output_artifacts    → trigger glossary generation if "data_dictionary"
+```
+
+#### Creating a Custom Projection
+
+Create a JSON file with `ProjectionConfig` fields:
+
+```json
+{
+  "name": "my-projection",
+  "description": "Custom documentation view",
+  "audience": "QA engineers",
+  "perspective": "testing and quality",
+  "clustering_goal": "Group by test domains and feature areas",
+  "doc_objectives": [
+    "Identify testable behaviors",
+    "Document input/output contracts",
+    "Map error handling paths"
+  ],
+  "doc_anti_objectives": [
+    "Implementation internals",
+    "Build configuration"
+  ],
+  "detail_level": "standard"
+}
+```
+
+Place it in `.codewiki/projections/my-projection.json` and use `--projection my-projection`, or pass the file path directly with `--projection ./path/to/file.json`.
+
+**Available fields**: `name`, `description`, `clustering_goal`, `clustering_examples`, `audience`, `perspective`, `doc_objectives`, `doc_anti_objectives`, `detail_level`, `max_depth_override`, `objectives_override`, `framework_context`, `supplementary_file_patterns`, `supplementary_file_role`, `output_artifacts` (`["documentation"]` or `["documentation", "data_dictionary"]`), `code_provenance` (for transpiled code).
+
 ## Extending Agent Instructions
 
 To add new customization options to the agent instructions system:
@@ -244,9 +312,15 @@ pytest --cov=codewiki tests/
 ```mermaid
 graph TB
     A[Repository Input] --> B[Dependency Graph Construction]
+    P[Projection Config] -.-> C
+    P -.-> S
+    P -.-> GL
+    P -.-> E
     B --> C[Hierarchical Decomposition]
     C --> D[Module Tree]
-    D --> E[Recursive Agent Processing]
+    D --> S[Supplementary File Collection]
+    S --> GL[Glossary Generation]
+    GL --> E[Recursive Agent Processing]
     E --> F{Complexity Check}
     F -->|Complex| G[Dynamic Delegation]
     F -->|Simple| H[Generate Documentation]

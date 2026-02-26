@@ -1,0 +1,26 @@
+{
+  "name": "ejb-migration",
+  "description": "EJB application documentation for migration planning.",
+  "audience": "software engineers planning reimplementation",
+  "perspective": "migration planning",
+  "framework_context": "This is a Java EE / EJB application. Key conventions:\n- Entity Beans: persistent data objects mapped to database tables, managed by the EJB container.\n- Session Beans (Stateless/Stateful): business logic components. Stateless beans handle single request/response; Stateful beans maintain conversational state.\n- JNDI lookups: the standard way EJB clients locate beans (e.g., java:comp/env/ejb/MyBean).\n- Deployment descriptors (ejb-jar.xml, web.xml): XML files that configure bean properties, security roles, transaction attributes, and resource references.\n- Container-Managed Transactions (CMT): the EJB container automatically manages transaction boundaries.",
+  "supplementary_file_patterns": [
+    "**/ejb-jar.xml",
+    "**/web.xml",
+    "**/persistence.xml",
+    "**/jboss*.xml"
+  ],
+  "supplementary_file_role": "EJB deployment descriptors and configuration files",
+  "doc_objectives": [
+    "Identify all EJB components and their roles",
+    "Map entity relationships and data model",
+    "Document business logic in session beans",
+    "Capture transaction and security configuration"
+  ],
+  "doc_anti_objectives": [
+    "Container internals and classloading details",
+    "IDE-specific project configuration"
+  ],
+  "objectives_override": "Document this EJB application for engineers planning a reimplementation in a modern framework. For each module, identify: (1) Entity beans and their database mappings, (2) Session beans and the business operations they expose, (3) JNDI lookup patterns and inter-bean dependencies, (4) Transaction and security configuration from deployment descriptors. Highlight aspects that will need architectural changes during migration."
+}
+

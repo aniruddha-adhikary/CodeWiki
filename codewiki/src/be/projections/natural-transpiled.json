@@ -1,0 +1,40 @@
+{
+  "name": "natural-transpiled",
+  "description": "Documentation for NATURAL-transpiled code targeting reimplementation.",
+  "audience": "software engineers reimplementing NATURAL-transpiled code",
+  "perspective": "original NATURAL logic and data structures",
+  "code_provenance": {
+    "source_language": "NATURAL",
+    "naming_conventions": {
+      "WS_*": "Working Storage variable (from NATURAL DEFINE DATA LOCAL/GLOBAL)",
+      "PERFORM_*": "PERFORM paragraph \u2014 subroutine call",
+      "PRFM_*": "PERFORM paragraph \u2014 subroutine call (alternate prefix)",
+      "MOVE_TO(a, b)": "Assignment: move value of a into b",
+      "IF_*": "Conditional block from NATURAL IF/DECIDE",
+      "LOOP_*": "Loop construct from NATURAL REPEAT/FOR/READ"
+    },
+    "runtime_library_packages": [
+      "com.softwareag.natural.runtime",
+      "com.softwareag.natural.io"
+    ],
+    "known_boilerplate_patterns": [
+      "NaturalProgram.initialize()",
+      "NaturalProgram.terminate()",
+      "WorkingStorage field declarations"
+    ]
+  },
+  "output_artifacts": ["documentation", "data_dictionary"],
+  "doc_objectives": [
+    "Recover original NATURAL program logic from transpiled code",
+    "Identify Working Storage data structures and their business meaning",
+    "Map PERFORM paragraphs to logical subroutines",
+    "Document ADABAS database access patterns"
+  ],
+  "doc_anti_objectives": [
+    "Transpiler-generated scaffolding and boilerplate",
+    "Runtime library internals",
+    "Java-specific implementation artifacts"
+  ],
+  "objectives_override": "This code was mechanically transpiled from Software AG NATURAL to Java. Your goal is to document the ORIGINAL business logic, not the Java translation artifacts. For each module: (1) Identify the original NATURAL program structure (Working Storage, main logic, PERFORMs), (2) Document data structures with their business meaning, (3) Explain the business workflow in terms of the original NATURAL constructs, (4) Flag ADABAS database access patterns (READ, FIND, GET, STORE, UPDATE, DELETE)."
+}
+

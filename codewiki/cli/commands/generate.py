@@ -129,9 +129,12 @@ def parse_patterns(patterns_str: str) -> List[str]:
 @click.option(
     "--projection",
     "-p",
-    type=str,
+    type=click.Path(exists=True, dir_okay=False, path_type=Path),
     default=None,
-    help="Projection name (developer, business, ejb-migration, natural-transpiled) or path to JSON",
+    help=(
+        "Path to a projection JSON file that controls how documentation is generated "
+        "(audience, perspective, objectives, clustering strategy, etc.)."
+    ),
 )
 @click.option(
     "--load-grouping",
@@ -167,7 +170,7 @@ def generate_command(
     max_token_per_module: Optional[int],
     max_token_per_leaf_module: Optional[int],
     max_depth: Optional[int],
-    projection: Optional[str],
+    projection: Optional[Path],
     load_grouping: Optional[str],
     generate_glossary: bool,
     load_glossary: Optional[str],
@@ -215,6 +218,10 @@ def generate_command(
     \b
     # Override max depth for hierarchical decomposition
     $ codewiki generate --max-depth 3
+
+    \b
+    # Use a custom projection JSON file
+    $ codewiki generate --projection my-projection.json
     """
     logger = create_logger(verbose=verbose)
     start_time = time.time()
@@ -271,11 +278,20 @@ def generate_command(
         # Resolve projection
         resolved_projection = None
         if projection:
-            from codewiki.src.be.projection import resolve_projection
+            import json as _json
+            from codewiki.src.be.projection import ProjectionConfig, ProjectionValidationError, validate_projection_dict
             try:
-                resolved_projection = resolve_projection(projection)
-            except ValueError as e:
+                with open(projection, "r", encoding="utf-8") as _fh:
+                    data = _json.load(_fh)
+            except _json.JSONDecodeError as e:
+                raise ConfigurationError(
+                    f"Projection file '{projection}' contains invalid JSON:\n  {e}"
+                )
+            try:
+                validate_projection_dict(data, source=str(projection))
+            except ProjectionValidationError as e:
                 raise ConfigurationError(str(e))
+            resolved_projection = ProjectionConfig.from_dict(data)
 
             if load_grouping:
                 import json

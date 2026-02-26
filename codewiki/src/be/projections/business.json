@@ -1,0 +1,20 @@
+{
+  "name": "business",
+  "description": "Business capability documentation for non-technical stakeholders.",
+  "clustering_goal": "Group components by business domain and capability rather than technical structure. Identify bounded contexts, business workflows, and domain concepts. Prefer names that reflect what the system does for the business over how it is implemented.",
+  "audience": "product managers and business analysts",
+  "perspective": "business capabilities",
+  "doc_objectives": [
+    "Explain what each component does in business terms",
+    "Identify business workflows and processes",
+    "Map technical components to business capabilities"
+  ],
+  "doc_anti_objectives": [
+    "Implementation details and code-level specifics",
+    "Internal data structures and algorithms",
+    "Developer-oriented API documentation"
+  ],
+  "objectives_override": "Write documentation for a non-technical audience. Focus on business capabilities, workflows, and domain concepts. Avoid code snippets, class names, and implementation details unless they directly explain a business concept.",
+  "detail_level": "standard"
+}
+

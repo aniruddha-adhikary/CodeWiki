@@ -160,45 +160,96 @@ codewiki generate --instructions "Focus on public APIs and include usage example
 
 Projections let you generate different documentation views for different audiences from the same codebase. Each projection controls how modules are grouped, what the documentation focuses on, and what level of technical detail is included.
 
-#### Built-in Projections
-
-| Projection | Audience | Description |
-|------------|----------|-------------|
-| `developer` | Developers & maintainers | Standard code-structure documentation (default) |
-| `business` | Product managers & business analysts | Business capability documentation, no code details |
-| `ejb-migration` | Migration engineers | EJB application docs with XML config context for migration planning |
-| `natural-transpiled` | Reimplementation engineers | Recovers original NATURAL logic from transpiled Java code |
+Pass a projection as a path to a JSON file:
 
 ```bash
-# Generate business-oriented documentation
-codewiki generate --projection business
+codewiki generate --projection ./my-projection.json
+```
+
+The JSON is validated before generation starts. If the file is missing, malformed, or has invalid field types, you get a specific error message immediately.
+
+#### Projection JSON Format
+
+Only `name` is required. All other fields are optional and fall back to sensible defaults.
+
+```json
+{
+  "name": "my-projection",
+  "description": "Custom projection for my team",
+  "audience": "senior engineers",
+  "perspective": "system design",
+  "detail_level": "detailed",
+  "clustering_goal": "Group by domain bounded context",
+  "doc_objectives": [
+    "Explain architectural decisions",
+    "Document cross-service dependencies"
+  ],
+  "doc_anti_objectives": [
+    "Low-level implementation details"
+  ],
+  "output_artifacts": ["documentation"]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string (**required**) | Identifier — also used as the output subdirectory name |
+| `description` | string | Human-readable description |
+| `audience` | string | Target audience injected into agent prompts |
+| `perspective` | string | Documentation perspective (e.g. `"code structure"`, `"business capabilities"`) |
+| `detail_level` | string | One of `standard`, `detailed`, `concise` |
+| `clustering_goal` | string | Injected into the clustering prompt to guide module grouping |
+| `clustering_examples` | string | Example groupings to steer the LLM |
+| `doc_objectives` | list of strings | What the documentation should cover |
+| `doc_anti_objectives` | list of strings | What to explicitly omit |
+| `objectives_override` | string | Fully replaces the default agent objectives |
+| `framework_context` | string | Extra context injected for framework-specific code |
+| `supplementary_file_patterns` | list of strings | Glob patterns for config files to include (e.g. `**/web.xml`) |
+| `supplementary_file_role` | string | Description of what the supplementary files are |
+| `output_artifacts` | list of strings | `"documentation"` and/or `"data_dictionary"` |
+| `max_depth_override` | integer ≥ 1 | Override hierarchical decomposition depth for this projection |
+| `code_provenance` | object | Origin metadata for transpiled/legacy code (see below) |
+
+**`code_provenance` sub-object:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source_language` | string | Original language (e.g. `"NATURAL"`, `"COBOL"`) |
+| `transpilation_tool` | string | Tool used to produce the target code |
+| `naming_conventions` | object | Map of identifier patterns to their meanings |
+| `runtime_library_packages` | list of strings | Packages to down-weight in documentation |
+| `known_boilerplate_patterns` | list of strings | Patterns to de-emphasise |
+
+#### Starter Projections
+
+The package ships four ready-made projection files you can copy and customise. Find them in `codewiki/src/be/projections/` inside the repository, or locate the installed package with:
+
+```bash
+python -c "import codewiki.src.be.projection as m; from pathlib import Path; print(Path(m.__file__).parent / 'projections')"
+```
+
+| File | Audience | Focus |
+|------|----------|-------|
+| `developer.json` | Developers & maintainers | Code structure (default behaviour) |
+| `business.json` | Product managers & analysts | Business capabilities, no code details |
+| `ejb-migration.json` | Migration engineers | EJB conventions, XML deployment descriptor context |
+| `natural-transpiled.json` | Reimplementation engineers | Recovers original NATURAL logic from transpiled Java |
+
+```bash
+# Copy a starter and run with it
+cp "$(python -c "import codewiki.src.be.projection as m; from pathlib import Path; print(Path(m.__file__).parent / 'projections/business.json')")" ./business.json
+codewiki generate --projection ./business.json
 
 # EJB migration docs (auto-includes ejb-jar.xml, web.xml, etc.)
-codewiki generate --projection ejb-migration --include "*.java"
+cp .../ejb-migration.json ./ejb-migration.json
+codewiki generate --projection ./ejb-migration.json --include "*.java"
 
 # NATURAL-transpiled docs with glossary of business terms
-codewiki generate --projection natural-transpiled --generate-glossary
-
-# Load a previously generated glossary instead of re-generating
-codewiki generate --projection natural-transpiled --load-glossary ./glossary.json
+codewiki generate --projection ./natural-transpiled.json --generate-glossary
 
 # Reuse a saved module grouping from a previous run
-codewiki generate --projection business --load-grouping .codewiki/projections/business-grouping.json
+codewiki generate --projection ./business.json --load-grouping .codewiki/projections/business-grouping.json
 ```
-
-#### Custom Projections
-
-Create a JSON file with your projection configuration and pass it directly:
-
-```bash
-# From a file path
-codewiki generate --projection ./my-projection.json
-
-# Or place it in .codewiki/projections/ and reference by name
-codewiki generate --projection my-projection
-```
-
-See the [Development Guide](DEVELOPMENT.md#projection-system) for the full `ProjectionConfig` field reference.
 
 #### Glossary / Data Dictionary
 
@@ -209,7 +260,7 @@ The glossary feature uses an LLM to map code identifiers to business-friendly na
 codewiki generate --generate-glossary
 
 # Combine with a projection
-codewiki generate --projection business --generate-glossary
+codewiki generate --projection ./business.json --generate-glossary
 
 # Reuse a previously generated glossary
 codewiki generate --load-glossary ./docs/business/glossary.json
@@ -219,7 +270,7 @@ Output files: `glossary.json` (structured) and `glossary.md` (human-readable tab
 
 | Option | Description | Example |
 |--------|-------------|---------|
-| `--projection`, `-p` | Projection name or path to JSON | `business`, `./custom.json` |
+| `--projection`, `-p` | Path to a projection JSON file | `./my-projection.json` |
 | `--generate-glossary` | Generate a glossary / data dictionary | Flag |
 | `--load-glossary` | Load a pre-existing glossary JSON | `./glossary.json` |
 | `--load-grouping` | Load saved module grouping (requires `--projection`) | `./grouping.json` |

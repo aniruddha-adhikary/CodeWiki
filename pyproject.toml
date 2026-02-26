@@ -99,6 +99,7 @@ packages = [
 
 [tool.setuptools.package-data]
 codewiki = ["templates/**/*", "py.typed"]
+"codewiki.src.be" = ["projections/*.json"]
 
 [tool.black]
 line-length = 100

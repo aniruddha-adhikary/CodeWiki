@@ -7,7 +7,129 @@ objectives, code provenance context, and framework-specific instructions.
 import json
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, List, Optional
+
+_PROJECTIONS_DIR = Path(__file__).parent / "projections"
+
+# ---------------------------------------------------------------------------
+# Validation constants & error
+# ---------------------------------------------------------------------------
+
+VALID_DETAIL_LEVELS: frozenset = frozenset({"standard", "detailed", "concise"})
+VALID_OUTPUT_ARTIFACTS: frozenset = frozenset({"documentation", "data_dictionary"})
+
+
+class ProjectionValidationError(ValueError):
+    """Raised when a projection JSON file has an invalid structure or values."""
+
+
+def _validate_code_provenance(cp: Any, errors: List[str]) -> None:
+    """Append validation errors for a code_provenance object."""
+    if not isinstance(cp, dict):
+        errors.append("'code_provenance' must be a JSON object or null")
+        return
+    for field_name in ("source_language", "transpilation_tool"):
+        val = cp.get(field_name)
+        if val is not None and not isinstance(val, str):
+            errors.append(f"'code_provenance.{field_name}' must be a string or null")
+    naming = cp.get("naming_conventions", {})
+    if not isinstance(naming, dict):
+        errors.append("'code_provenance.naming_conventions' must be a JSON object")
+    else:
+        for k, v in naming.items():
+            if not isinstance(k, str) or not isinstance(v, str):
+                errors.append("'code_provenance.naming_conventions' must map strings to strings")
+                break
+    for list_field in ("runtime_library_packages", "known_boilerplate_patterns"):
+        val = cp.get(list_field, [])
+        if not isinstance(val, list):
+            errors.append(f"'code_provenance.{list_field}' must be a list")
+        else:
+            for i, item in enumerate(val):
+                if not isinstance(item, str):
+                    errors.append(f"'code_provenance.{list_field}[{i}]' must be a string")
+
+
+def validate_projection_dict(data: Any, source: str = "<unknown>") -> None:
+    """Validate a dict deserialised from a projection JSON file.
+
+    Raises ProjectionValidationError with a descriptive message listing all
+    problems found.  Callers should catch this and surface it to the user.
+    """
+    if not isinstance(data, dict):
+        raise ProjectionValidationError(
+            f"Projection '{source}': expected a JSON object at the top level, "
+            f"got {type(data).__name__}"
+        )
+
+    errors: List[str] = []
+
+    # name — must be present and non-empty
+    name = data.get("name", "")
+    if not isinstance(name, str) or not name.strip():
+        errors.append("'name' must be a non-empty string")
+
+    # plain string fields (optional, but must be strings when present)
+    for f in ("description", "clustering_goal", "clustering_examples", "audience", "perspective",
+              "objectives_override", "framework_context", "supplementary_file_role", "glossary_path"):
+        val = data.get(f)
+        if val is not None and not isinstance(val, str):
+            errors.append(f"'{f}' must be a string or null, got {type(val).__name__}")
+
+    # detail_level
+    dl = data.get("detail_level", "standard")
+    if not isinstance(dl, str):
+        errors.append(f"'detail_level' must be a string, got {type(dl).__name__}")
+    elif dl not in VALID_DETAIL_LEVELS:
+        errors.append(f"'detail_level' must be one of {sorted(VALID_DETAIL_LEVELS)}, got '{dl}'")
+
+    # max_depth_override
+    mdep = data.get("max_depth_override")
+    if mdep is not None and (not isinstance(mdep, int) or isinstance(mdep, bool) or mdep < 1):
+        errors.append("'max_depth_override' must be a positive integer or null")
+
+    # list-of-strings fields
+    for f in ("doc_objectives", "doc_anti_objectives", "supplementary_file_patterns"):
+        val = data.get(f)
+        if val is None:
+            continue
+        if not isinstance(val, list):
+            errors.append(f"'{f}' must be a list or null, got {type(val).__name__}")
+        else:
+            for i, item in enumerate(val):
+                if not isinstance(item, str):
+                    errors.append(f"'{f}[{i}]' must be a string, got {type(item).__name__}")
+
+    # output_artifacts
+    oa = data.get("output_artifacts", ["documentation"])
+    if not isinstance(oa, list):
+        errors.append("'output_artifacts' must be a list")
+    else:
+        for i, item in enumerate(oa):
+            if not isinstance(item, str):
+                errors.append(f"'output_artifacts[{i}]' must be a string")
+            elif item not in VALID_OUTPUT_ARTIFACTS:
+                errors.append(
+                    f"'output_artifacts[{i}]': unknown artifact '{item}'; "
+                    f"valid values: {sorted(VALID_OUTPUT_ARTIFACTS)}"
+                )
+
+    # saved_grouping
+    sg = data.get("saved_grouping")
+    if sg is not None and not isinstance(sg, dict):
+        errors.append("'saved_grouping' must be a JSON object or null")
+
+    # code_provenance
+    cp = data.get("code_provenance")
+    if cp is not None:
+        _validate_code_provenance(cp, errors)
+
+    if errors:
+        bullet_list = "\n  • ".join(errors)
+        raise ProjectionValidationError(
+            f"Invalid projection '{source}':\n  • {bullet_list}"
+        )
 
 
 @dataclass
@@ -195,166 +317,44 @@ def compile_projection_instructions(
 
 
 # ---------------------------------------------------------------------------
-# Built-in projection factories
+# Built-in projection loader
 # ---------------------------------------------------------------------------
+
+_BUILTIN_PROJECTIONS: set[str] = {"developer", "business", "ejb-migration", "natural-transpiled"}
+
+
+def _load_builtin(name: str) -> ProjectionConfig:
+    """Load a built-in projection from its bundled JSON file."""
+    json_path = _PROJECTIONS_DIR / f"{name}.json"
+    with open(json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    validate_projection_dict(data, source=name)
+    return ProjectionConfig.from_dict(data)
 
 
 def get_developer_projection() -> ProjectionConfig:
     """Backwards-compatible developer documentation projection."""
-    return ProjectionConfig(
-        name="developer",
-        description="Standard developer documentation with code structure focus.",
-        audience="developers and maintainers",
-        perspective="code structure",
-    )
+    return _load_builtin("developer")
 
 
 def get_business_projection() -> ProjectionConfig:
     """Business-oriented documentation projection for non-technical stakeholders."""
-    return ProjectionConfig(
-        name="business",
-        description="Business capability documentation for non-technical stakeholders.",
-        clustering_goal=(
-            "Group components by business domain and capability rather than "
-            "technical structure. Identify bounded contexts, business workflows, "
-            "and domain concepts. Prefer names that reflect what the system does "
-            "for the business over how it is implemented."
-        ),
-        audience="product managers and business analysts",
-        perspective="business capabilities",
-        doc_objectives=[
-            "Explain what each component does in business terms",
-            "Identify business workflows and processes",
-            "Map technical components to business capabilities",
-        ],
-        doc_anti_objectives=[
-            "Implementation details and code-level specifics",
-            "Internal data structures and algorithms",
-            "Developer-oriented API documentation",
-        ],
-        objectives_override=(
-            "Write documentation for a non-technical audience. Focus on business "
-            "capabilities, workflows, and domain concepts. Avoid code snippets, "
-            "class names, and implementation details unless they directly explain "
-            "a business concept."
-        ),
-        detail_level="standard",
-    )
+    return _load_builtin("business")
 
 
 def get_ejb_migration_projection() -> ProjectionConfig:
     """EJB migration projection for engineers planning reimplementation."""
-    return ProjectionConfig(
-        name="ejb-migration",
-        description="EJB application documentation for migration planning.",
-        audience="software engineers planning reimplementation",
-        perspective="migration planning",
-        framework_context=(
-            "This is a Java EE / EJB application. Key conventions:\n"
-            "- Entity Beans: persistent data objects mapped to database tables, "
-            "managed by the EJB container.\n"
-            "- Session Beans (Stateless/Stateful): business logic components. "
-            "Stateless beans handle single request/response; Stateful beans "
-            "maintain conversational state.\n"
-            "- JNDI lookups: the standard way EJB clients locate beans "
-            "(e.g., java:comp/env/ejb/MyBean).\n"
-            "- Deployment descriptors (ejb-jar.xml, web.xml): XML files that "
-            "configure bean properties, security roles, transaction attributes, "
-            "and resource references.\n"
-            "- Container-Managed Transactions (CMT): the EJB container "
-            "automatically manages transaction boundaries."
-        ),
-        supplementary_file_patterns=[
-            "**/ejb-jar.xml",
-            "**/web.xml",
-            "**/persistence.xml",
-            "**/jboss*.xml",
-        ],
-        supplementary_file_role="EJB deployment descriptors and configuration files",
-        doc_objectives=[
-            "Identify all EJB components and their roles",
-            "Map entity relationships and data model",
-            "Document business logic in session beans",
-            "Capture transaction and security configuration",
-        ],
-        doc_anti_objectives=[
-            "Container internals and classloading details",
-            "IDE-specific project configuration",
-        ],
-        objectives_override=(
-            "Document this EJB application for engineers planning a "
-            "reimplementation in a modern framework. For each module, identify: "
-            "(1) Entity beans and their database mappings, (2) Session beans and "
-            "the business operations they expose, (3) JNDI lookup patterns and "
-            "inter-bean dependencies, (4) Transaction and security configuration "
-            "from deployment descriptors. Highlight aspects that will need "
-            "architectural changes during migration."
-        ),
-    )
+    return _load_builtin("ejb-migration")
 
 
 def get_natural_transpiled_projection() -> ProjectionConfig:
     """Projection for NATURAL-transpiled codebases."""
-    return ProjectionConfig(
-        name="natural-transpiled",
-        description="Documentation for NATURAL-transpiled code targeting reimplementation.",
-        audience="software engineers reimplementing NATURAL-transpiled code",
-        perspective="original NATURAL logic and data structures",
-        code_provenance=CodeProvenance(
-            source_language="NATURAL",
-            naming_conventions={
-                "WS_*": "Working Storage variable (from NATURAL DEFINE DATA LOCAL/GLOBAL)",
-                "PERFORM_*": "PERFORM paragraph — subroutine call",
-                "PRFM_*": "PERFORM paragraph — subroutine call (alternate prefix)",
-                "MOVE_TO(a, b)": "Assignment: move value of a into b",
-                "IF_*": "Conditional block from NATURAL IF/DECIDE",
-                "LOOP_*": "Loop construct from NATURAL REPEAT/FOR/READ",
-            },
-            runtime_library_packages=[
-                "com.softwareag.natural.runtime",
-                "com.softwareag.natural.io",
-            ],
-            known_boilerplate_patterns=[
-                "NaturalProgram.initialize()",
-                "NaturalProgram.terminate()",
-                "WorkingStorage field declarations",
-            ],
-        ),
-        output_artifacts=["documentation", "data_dictionary"],
-        doc_objectives=[
-            "Recover original NATURAL program logic from transpiled code",
-            "Identify Working Storage data structures and their business meaning",
-            "Map PERFORM paragraphs to logical subroutines",
-            "Document ADABAS database access patterns",
-        ],
-        doc_anti_objectives=[
-            "Transpiler-generated scaffolding and boilerplate",
-            "Runtime library internals",
-            "Java-specific implementation artifacts",
-        ],
-        objectives_override=(
-            "This code was mechanically transpiled from Software AG NATURAL to "
-            "Java. Your goal is to document the ORIGINAL business logic, not the "
-            "Java translation artifacts. For each module: (1) Identify the "
-            "original NATURAL program structure (Working Storage, main logic, "
-            "PERFORMs), (2) Document data structures with their business meaning, "
-            "(3) Explain the business workflow in terms of the original NATURAL "
-            "constructs, (4) Flag ADABAS database access patterns (READ, FIND, "
-            "GET, STORE, UPDATE, DELETE)."
-        ),
-    )
+    return _load_builtin("natural-transpiled")
 
 
 # ---------------------------------------------------------------------------
 # Projection resolver
 # ---------------------------------------------------------------------------
-
-_BUILTIN_PROJECTIONS = {
-    "developer": get_developer_projection,
-    "business": get_business_projection,
-    "ejb-migration": get_ejb_migration_projection,
-    "natural-transpiled": get_natural_transpiled_projection,
-}
 
 
 def resolve_projection(name_or_path: str) -> ProjectionConfig:
@@ -368,25 +368,41 @@ def resolve_projection(name_or_path: str) -> ProjectionConfig:
     """
     # 1. Built-in name
     if name_or_path in _BUILTIN_PROJECTIONS:
-        return _BUILTIN_PROJECTIONS[name_or_path]()
+        return _load_builtin(name_or_path)
 
     # 2. JSON file path
     if name_or_path.endswith(".json"):
         if not os.path.isfile(name_or_path):
-            raise ValueError(f"Projection file not found: {name_or_path}")
-        with open(name_or_path, "r") as f:
-            data = json.load(f)
+            raise FileNotFoundError(f"Projection file not found: {name_or_path}")
+        with open(name_or_path, "r", encoding="utf-8") as f:
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError as exc:
+                raise json.JSONDecodeError(
+                    f"Projection file '{name_or_path}' is not valid JSON: {exc.msg}",
+                    exc.doc,
+                    exc.pos,
+                ) from exc
+        validate_projection_dict(data, source=name_or_path)
         return ProjectionConfig.from_dict(data)
 
     # 3. Project-local .codewiki/projections/{name}.json
     local_path = os.path.join(".codewiki", "projections", f"{name_or_path}.json")
     if os.path.isfile(local_path):
-        with open(local_path, "r") as f:
-            data = json.load(f)
+        with open(local_path, "r", encoding="utf-8") as f:
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError as exc:
+                raise json.JSONDecodeError(
+                    f"Projection file '{local_path}' is not valid JSON: {exc.msg}",
+                    exc.doc,
+                    exc.pos,
+                ) from exc
+        validate_projection_dict(data, source=local_path)
         return ProjectionConfig.from_dict(data)
 
     # 4. Unknown
-    available = ", ".join(sorted(_BUILTIN_PROJECTIONS.keys()))
+    available = ", ".join(sorted(_BUILTIN_PROJECTIONS))
     raise ValueError(
         f"Unknown projection '{name_or_path}'. "
         f"Available built-in projections: {available}. "

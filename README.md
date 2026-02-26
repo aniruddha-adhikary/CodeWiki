@@ -158,15 +158,38 @@ codewiki generate --instructions "Focus on public APIs and include usage example
 
 ### Projection Framework
 
-Projections let you generate different documentation views for different audiences from the same codebase. Each projection controls how modules are grouped, what the documentation focuses on, and what level of technical detail is included.
-
-Pass a projection as a path to a JSON file:
+Projections let you generate different documentation views for different audiences from the same codebase. A projection is a JSON file that controls how modules are grouped, what the documentation focuses on, and what level of technical detail is included — without changing the underlying dependency graph or analysis pipeline.
 
 ```bash
 codewiki generate --projection ./my-projection.json
 ```
 
 The JSON is validated before generation starts. If the file is missing, malformed, or has invalid field types, you get a specific error message immediately.
+
+When a projection is used, output goes into a subdirectory named after the projection (e.g. `docs/business/`), so you can generate multiple views side by side from the same codebase.
+
+#### How Projections Affect the Pipeline
+
+Projections steer three stages of the generation pipeline:
+
+```
+Projection JSON
+  │
+  ├─ Clustering ──── clustering_goal → injected into the LLM clustering prompt
+  │                  saved_grouping  → bypasses the clustering LLM call entirely
+  │
+  ├─ Agent Prompts ─ audience, perspective, detail_level, doc_objectives,
+  │                  doc_anti_objectives → compiled into <CUSTOM_INSTRUCTIONS>
+  │                  objectives_override → replaces the default <OBJECTIVES> block
+  │                  framework_context   → injected as <FRAMEWORK_CONTEXT>
+  │                  code_provenance     → injected as <CODE_CONTEXT>
+  │                  glossary            → injected as glossary block
+  │
+  └─ File Collection  supplementary_file_patterns → config/XML files read and
+                      supplementary_file_role       passed alongside source code
+```
+
+Everything else — dependency graph construction, AST parsing, topological sorting, the documentation structure template, the agent workflow, and the repo/module overview prompts — remains unchanged regardless of the projection.
 
 #### Projection JSON Format
 
@@ -191,34 +214,140 @@ Only `name` is required. All other fields are optional and fall back to sensible
 }
 ```
 
-| Field | Type | Description |
-|-------|------|-------------|
-| `name` | string (**required**) | Identifier — also used as the output subdirectory name |
-| `description` | string | Human-readable description |
-| `audience` | string | Target audience injected into agent prompts |
-| `perspective` | string | Documentation perspective (e.g. `"code structure"`, `"business capabilities"`) |
-| `detail_level` | string | One of `standard`, `detailed`, `concise` |
-| `clustering_goal` | string | Injected into the clustering prompt to guide module grouping |
-| `clustering_examples` | string | Example groupings to steer the LLM |
-| `doc_objectives` | list of strings | What the documentation should cover |
-| `doc_anti_objectives` | list of strings | What to explicitly omit |
-| `objectives_override` | string | Fully replaces the default agent objectives |
-| `framework_context` | string | Extra context injected for framework-specific code |
-| `supplementary_file_patterns` | list of strings | Glob patterns for config files to include (e.g. `**/web.xml`) |
-| `supplementary_file_role` | string | Description of what the supplementary files are |
-| `output_artifacts` | list of strings | `"documentation"` and/or `"data_dictionary"` |
-| `max_depth_override` | integer ≥ 1 | Override hierarchical decomposition depth for this projection |
-| `code_provenance` | object | Origin metadata for transpiled/legacy code (see below) |
+#### Field Reference
 
-**`code_provenance` sub-object:**
+##### Identity
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `source_language` | string | Original language (e.g. `"NATURAL"`, `"COBOL"`) |
-| `transpilation_tool` | string | Tool used to produce the target code |
-| `naming_conventions` | object | Map of identifier patterns to their meanings |
-| `runtime_library_packages` | list of strings | Packages to down-weight in documentation |
-| `known_boilerplate_patterns` | list of strings | Patterns to de-emphasise |
+| `name` | string (**required**) | Identifier for the projection. Also used as the output subdirectory name under `docs/`. |
+| `description` | string | Human-readable description. Not injected into prompts — for your own reference. |
+
+##### Audience and Perspective
+
+These fields are compiled into a `<CUSTOM_INSTRUCTIONS>` block appended to every agent's system prompt.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `audience` | string | _(none)_ | Who the documentation is for. Injected as `"Target audience: {value}."` |
+| `perspective` | string | _(none)_ | The lens through which to write. Injected as `"Documentation perspective: {value}."` |
+| `detail_level` | string | `"standard"` | One of `standard`, `detailed`, or `concise`. Only injected when not `standard`. |
+
+**Example effect:** Setting `"audience": "product managers"` and `"perspective": "business capabilities"` causes every agent to receive:
+
+```
+<CUSTOM_INSTRUCTIONS>
+Target audience: product managers.
+Documentation perspective: business capabilities.
+</CUSTOM_INSTRUCTIONS>
+```
+
+##### Documentation Objectives
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `doc_objectives` | list of strings | _(none)_ | What the documentation should cover. Each item becomes a bullet in `<CUSTOM_INSTRUCTIONS>`. |
+| `doc_anti_objectives` | list of strings | _(none)_ | What to explicitly omit. Each item becomes a "Do NOT include" bullet. |
+| `objectives_override` | string | _(none)_ | **Fully replaces** the default `<OBJECTIVES>` block in the agent system prompt. When set, the default objectives ("help developers understand the module's purpose, architecture, and system fit") are discarded entirely. |
+
+`doc_objectives` and `doc_anti_objectives` are appended as custom instructions _alongside_ the default objectives. Use `objectives_override` when you need to rewrite the objectives from scratch — for example, to make the agent focus on migration planning instead of general documentation.
+
+##### Module Clustering
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `clustering_goal` | string | _(none)_ | Injected as a `<GROUPING_STRATEGY>` block into the LLM clustering prompt. Steers how components are grouped into modules. |
+| `clustering_examples` | string | _(none)_ | Example groupings to further steer the LLM. |
+| `saved_grouping` | object | _(none)_ | A pre-built module tree dict. When set, **skips the clustering LLM call entirely** and uses this grouping as-is. Useful for locking down a known-good grouping. |
+| `max_depth_override` | integer (≥ 1) | _(none)_ | Override the hierarchical decomposition depth for this projection. |
+
+**Tip:** Run a generation once, inspect the resulting `module_tree.json`, edit it to your liking, then pass it back via `--load-grouping` on subsequent runs to skip the clustering step.
+
+##### Framework and Code Context
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `framework_context` | string | _(none)_ | Free-form text injected as a `<FRAMEWORK_CONTEXT>` block in the agent system prompt. Use this to explain framework conventions the LLM might not know (e.g. EJB patterns, Spring conventions, Django signals). |
+| `code_provenance` | object | _(none)_ | Origin metadata for non-standard codebases (transpiled, generated, legacy). Compiled into a `<CODE_CONTEXT>` block. See [Code Provenance](#code-provenance) below. |
+
+##### Supplementary Files
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `supplementary_file_patterns` | list of strings | _(none)_ | Glob patterns for non-code files to include alongside source code (e.g. `**/ejb-jar.xml`, `**/web.xml`, `**/*.properties`). Matched files are read and passed to agents as `<SUPPLEMENTARY_CONFIGURATION>`. |
+| `supplementary_file_role` | string | `"Configuration files relevant to this module:"` | Describes what the supplementary files are, shown as a heading in the supplementary block. |
+
+Supplementary files are automatically filtered per module — each agent only sees files whose paths are near the module's source files.
+
+##### Output Control
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `output_artifacts` | list of strings | `["documentation"]` | What to generate. Valid values: `"documentation"`, `"data_dictionary"`. Include `"data_dictionary"` to trigger glossary generation. |
+| `glossary_path` | string | _(none)_ | Path to a pre-existing glossary JSON file to load instead of generating one. |
+
+#### Code Provenance
+
+The `code_provenance` sub-object is designed for transpiled, generated, or legacy codebases where the source code doesn't look like idiomatic code in its language. It compiles into a `<CODE_CONTEXT>` block.
+
+```json
+{
+  "code_provenance": {
+    "source_language": "COBOL",
+    "transpilation_tool": "Micro Focus Enterprise Developer",
+    "naming_conventions": {
+      "WS-*": "Working Storage variable",
+      "PERFORM-*": "PERFORM paragraph (subroutine call)",
+      "88-level": "Condition name (boolean flag)"
+    },
+    "runtime_library_packages": [
+      "com.microfocus.cobol.runtime"
+    ],
+    "known_boilerplate_patterns": [
+      "CobolProgram.initialize()",
+      "CobolProgram.terminate()"
+    ]
+  }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `source_language` | string | The original language before transpilation (e.g. `"NATURAL"`, `"COBOL"`, `"RPG"`). |
+| `transpilation_tool` | string | The tool used to produce the target code (e.g. `"Natural One"`, `"Micro Focus"`). |
+| `naming_conventions` | object | Map of identifier patterns to their meanings. Helps the agent decode cryptic names. |
+| `runtime_library_packages` | list of strings | Packages that are part of the transpiler runtime. The agent is told to down-weight these in documentation. |
+| `known_boilerplate_patterns` | list of strings | Code patterns that are transpiler scaffolding. The agent is told to de-emphasise these. |
+
+The compiled output looks like:
+
+```
+<CODE_CONTEXT>
+This codebase was originally written in COBOL.
+It was transpiled using Micro Focus Enterprise Developer.
+
+Naming conventions from the original language:
+  - WS-*: Working Storage variable
+  - PERFORM-*: PERFORM paragraph (subroutine call)
+
+Runtime library packages (downweight in documentation): com.microfocus.cobol.runtime
+
+Known boilerplate patterns to de-emphasize:
+  - CobolProgram.initialize()
+  - CobolProgram.terminate()
+</CODE_CONTEXT>
+```
+
+#### What Projections Cannot Change
+
+The following are hardcoded in the prompt templates and not configurable via projections:
+
+- **Agent role** — The agent is always introduced as "an AI documentation assistant" generating "comprehensive system documentation."
+- **Output structure** — Documentation always follows the pattern: main module `.md` file with overview and architecture, sub-module `.md` files, and Mermaid diagrams. You cannot change the output format to, say, plain-text or HTML.
+- **Agent workflow** — The sequence of steps (analyse components → create main file → delegate sub-modules → cross-reference) is fixed.
+- **Repo and module overview prompts** — The final overview generation has no projection awareness. Overviews are always written from a generic developer perspective.
+- **Folder filtering prompt** — The prompt that decides which folders contain "core functionality" is fixed and always filters out test/documentation files.
+- **Clustering output format** — The JSON structure of grouped components is fixed. `clustering_goal` steers the grouping strategy but not the output schema.
 
 #### Starter Projections
 
@@ -228,28 +357,77 @@ The package ships four ready-made projection files you can copy and customise. F
 python -c "import codewiki.src.be.projection as m; from pathlib import Path; print(Path(m.__file__).parent / 'projections')"
 ```
 
-| File | Audience | Focus |
-|------|----------|-------|
-| `developer.json` | Developers & maintainers | Code structure (default behaviour) |
-| `business.json` | Product managers & analysts | Business capabilities, no code details |
-| `ejb-migration.json` | Migration engineers | EJB conventions, XML deployment descriptor context |
-| `natural-transpiled.json` | Reimplementation engineers | Recovers original NATURAL logic from transpiled Java |
+| File | Audience | Focus | Key fields demonstrated |
+|------|----------|-------|------------------------|
+| `developer.json` | Developers & maintainers | Code structure (default behaviour) | `audience`, `perspective` only — minimal projection |
+| `business.json` | Product managers & analysts | Business capabilities, no code details | `clustering_goal`, `doc_objectives`, `doc_anti_objectives`, `objectives_override` |
+| `ejb-migration.json` | Migration engineers | EJB conventions, deployment descriptors | `framework_context`, `supplementary_file_patterns`, `supplementary_file_role` |
+| `natural-transpiled.json` | Reimplementation engineers | Recovers original NATURAL logic from transpiled Java | `code_provenance`, `output_artifacts` with `data_dictionary` |
 
 ```bash
-# Copy a starter and run with it
-cp "$(python -c "import codewiki.src.be.projection as m; from pathlib import Path; print(Path(m.__file__).parent / 'projections/business.json')")" ./business.json
-codewiki generate --projection ./business.json
-
-# EJB migration docs (auto-includes ejb-jar.xml, web.xml, etc.)
-cp .../ejb-migration.json ./ejb-migration.json
-codewiki generate --projection ./ejb-migration.json --include "*.java"
-
-# NATURAL-transpiled docs with glossary of business terms
-codewiki generate --projection ./natural-transpiled.json --generate-glossary
-
-# Reuse a saved module grouping from a previous run
-codewiki generate --projection ./business.json --load-grouping .codewiki/projections/business-grouping.json
+# Copy a starter and customise it
+cp "$(python -c "import codewiki.src.be.projection as m; from pathlib import Path; print(Path(m.__file__).parent / 'projections/business.json')")" ./my-projection.json
+# Edit my-projection.json to taste...
+codewiki generate --projection ./my-projection.json
 ```
+
+#### Creating a Custom Projection
+
+**Step 1: Start with a minimal JSON file.**
+
+```json
+{
+  "name": "security-review",
+  "audience": "security engineers",
+  "perspective": "attack surface and trust boundaries"
+}
+```
+
+This is enough to shift the tone of every generated document toward security concerns while keeping everything else at defaults.
+
+**Step 2: Add objectives to sharpen focus.**
+
+```json
+{
+  "name": "security-review",
+  "audience": "security engineers",
+  "perspective": "attack surface and trust boundaries",
+  "doc_objectives": [
+    "Identify authentication and authorization boundaries",
+    "Document input validation and sanitization points",
+    "Map data flows that cross trust boundaries"
+  ],
+  "doc_anti_objectives": [
+    "UI layout and styling details",
+    "Build and deployment configuration"
+  ]
+}
+```
+
+**Step 3: Steer clustering if the default grouping doesn't suit your needs.**
+
+```json
+{
+  "name": "security-review",
+  "clustering_goal": "Group components by trust boundary: external-facing, internal services, data access layer, and shared utilities."
+}
+```
+
+**Step 4: Add framework context if the codebase uses patterns the LLM might not infer.**
+
+```json
+{
+  "framework_context": "This is a Spring Boot application using Spring Security with JWT tokens. @PreAuthorize annotations control method-level access. SecurityFilterChain beans define the HTTP security pipeline."
+}
+```
+
+**Step 5: Run it.**
+
+```bash
+codewiki generate --projection ./security-review.json --verbose
+```
+
+Output lands in `docs/security-review/`.
 
 #### Glossary / Data Dictionary
 
@@ -257,16 +435,40 @@ The glossary feature uses an LLM to map code identifiers to business-friendly na
 
 ```bash
 # Generate a glossary alongside documentation
-codewiki generate --generate-glossary
+codewiki generate --projection ./my-projection.json --generate-glossary
 
-# Combine with a projection
-codewiki generate --projection ./business.json --generate-glossary
-
-# Reuse a previously generated glossary
-codewiki generate --load-glossary ./docs/business/glossary.json
+# Reuse a previously generated glossary on subsequent runs
+codewiki generate --projection ./my-projection.json --load-glossary ./docs/my-projection/glossary.json
 ```
 
-Output files: `glossary.json` (structured) and `glossary.md` (human-readable table).
+You can also enable glossary generation inside the projection JSON itself:
+
+```json
+{
+  "output_artifacts": ["documentation", "data_dictionary"]
+}
+```
+
+Output files: `glossary.json` (structured, reusable) and `glossary.md` (human-readable table).
+
+#### Saved Groupings
+
+After a generation run, the clustering result is saved as `module_tree.json` in the output directory. You can edit this file and pass it back to skip the clustering LLM call on future runs:
+
+```bash
+# First run — generates module_tree.json
+codewiki generate --projection ./my-projection.json
+
+# Edit docs/my-projection/module_tree.json to your liking...
+
+# Subsequent runs — reuse the grouping
+codewiki generate --projection ./my-projection.json \
+  --load-grouping ./docs/my-projection/module_tree.json
+```
+
+This is useful when you've found a good module grouping and want to iterate on other projection fields without re-clustering.
+
+#### Projection CLI Options
 
 | Option | Description | Example |
 |--------|-------------|---------|
@@ -275,13 +477,15 @@ Output files: `glossary.json` (structured) and `glossary.md` (human-readable tab
 | `--load-glossary` | Load a pre-existing glossary JSON | `./glossary.json` |
 | `--load-grouping` | Load saved module grouping (requires `--projection`) | `./grouping.json` |
 
+These options combine with the standard generation flags (`--include`, `--exclude`, `--focus`, `--instructions`, `--max-depth`, etc.) — projections and CLI flags are additive.
+
 #### Pattern Behavior (Important!)
 
 - **`--include`**: When specified, **ONLY** these patterns are used (replaces defaults completely)
   - Example: `--include "*.cs"` will analyze ONLY `.cs` files
   - If omitted, all supported file types are analyzed
   - Supports glob patterns: `*.py`, `src/**/*.ts`, `*.{js,jsx}`
-  
+
 - **`--exclude`**: When specified, patterns are **MERGED** with default ignore patterns
   - Example: `--exclude "Tests,Specs"` will exclude these directories AND still exclude `.git`, `__pycache__`, `node_modules`, etc.
   - Default patterns include: `.git`, `node_modules`, `__pycache__`, `*.pyc`, `bin/`, `dist/`, and many more

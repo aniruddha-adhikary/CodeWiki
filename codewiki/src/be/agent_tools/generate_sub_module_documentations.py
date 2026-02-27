@@ -7,7 +7,7 @@ from codewiki.src.be.agent_tools.read_code_components import read_code_component
 from codewiki.src.be.agent_tools.str_replace_editor import str_replace_editor_tool
 from codewiki.src.be.llm_services import create_fallback_models
 from codewiki.src.be.prompt_template import format_system_prompt, format_leaf_system_prompt, format_user_prompt
-from codewiki.src.be.utils import is_complex_module, count_tokens, filter_supplementary_for_module
+from codewiki.src.be.utils import is_complex_module, count_tokens, filter_supplementary_for_module, slugify
 from codewiki.src.be.cluster_modules import format_potential_core_components
 
 import logging
@@ -55,6 +55,8 @@ async def generate_sub_module_documentation(
 
         num_tokens = count_tokens(format_potential_core_components(core_component_ids, ctx.deps.components)[-1])
         
+        sub_module_filename = slugify(sub_module_name)
+
         if is_complex_module(ctx.deps.components, core_component_ids) and ctx.deps.current_depth < ctx.deps.max_depth and num_tokens >= ctx.deps.config.max_token_per_leaf_module:
             sub_agent = Agent(
                 model=fallback_models,
@@ -67,6 +69,7 @@ async def generate_sub_module_documentation(
                     framework_context=ctx.deps.framework_context,
                     objectives=ctx.deps.objectives_override,
                     glossary=ctx.deps.glossary_block,
+                    module_filename=sub_module_filename,
                 ),
                 tools=[read_code_components_tool, str_replace_editor_tool, generate_sub_module_documentation_tool],
             )
@@ -82,6 +85,7 @@ async def generate_sub_module_documentation(
                     framework_context=ctx.deps.framework_context,
                     objectives=ctx.deps.objectives_override,
                     glossary=ctx.deps.glossary_block,
+                    module_filename=sub_module_filename,
                 ),
                 tools=[read_code_components_tool, str_replace_editor_tool],
             )
@@ -120,7 +124,7 @@ async def generate_sub_module_documentation(
     # restore the previous module name
     deps.current_module_name = previous_module_name
 
-    return f"Generate successfully. Documentations: {', '.join([key + '.md' for key in sub_module_specs.keys()])} are saved in the working directory."
+    return f"Generate successfully. Documentations: {', '.join([slugify(key) + '.md' for key in sub_module_specs.keys()])} are saved in the working directory."
 
 
 generate_sub_module_documentation_tool = Tool(function=generate_sub_module_documentation, name="generate_sub_module_documentation", description="Generate detailed description of a given sub-module specs to the sub-agents", takes_ctx=True)

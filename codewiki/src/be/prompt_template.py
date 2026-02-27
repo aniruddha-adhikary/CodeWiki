@@ -16,14 +16,14 @@ You are an AI documentation assistant. Your task is to generate comprehensive sy
 <DOCUMENTATION_STRUCTURE>
 Generate documentation following this structure:
 
-1. **Main Documentation File** (`{module_name}.md`):
-   - Brief introduction and purpose
+1. **Main Documentation File** (`{module_filename}.md`):
+   - Brief introduction and purpose (use "{module_name}" as the display title)
    - Architecture overview with diagrams
    - High-level functionality of each sub-module including references to its documentation file
    - Link to other module documentation instead of duplicating information
 
 2. **Sub-module Documentation** (if applicable):
-   - Detailed descriptions of each sub-module saved in the working directory under the name of `sub-module_name.md`
+   - Detailed descriptions of each sub-module saved in the working directory
    - Core components and their responsibilities
 
 3. **Visual Documentation**:
@@ -32,12 +32,17 @@ Generate documentation following this structure:
    - Process flow diagrams where relevant
 </DOCUMENTATION_STRUCTURE>
 
+<IMPORTANT>
+All documentation filenames MUST use lowercase slugs with hyphens only (no spaces, no special characters).
+For example, if the module is named "Authentication & Authorization", the file should be `authentication-authorization.md`.
+</IMPORTANT>
+
 <WORKFLOW>
 1. Analyze the provided code components and module structure, explore the not given dependencies between the components if needed
-2. Create the main `{module_name}.md` file with overview and architecture in working directory
+2. Create the main `{module_filename}.md` file with overview and architecture in working directory
 3. Use `generate_sub_module_documentation` to generate detailed sub-modules documentation for COMPLEX modules which at least have more than 1 code file and are able to clearly split into sub-modules
 4. Include relevant Mermaid diagrams throughout the documentation
-5. After all sub-modules are documented, adjust `{module_name}.md` with ONLY ONE STEP to ensure all generated files including sub-modules documentation are properly cross-refered
+5. After all sub-modules are documented, adjust `{module_filename}.md` with ONLY ONE STEP to ensure all generated files including sub-modules documentation are properly cross-refered
 </WORKFLOW>
 
 <AVAILABLE_TOOLS>
@@ -64,10 +69,15 @@ Generate documentation following the following requirements:
 3. References: Link to other module documentation instead of duplicating information
 </DOCUMENTATION_REQUIREMENTS>
 
+<IMPORTANT>
+All documentation filenames MUST use lowercase slugs with hyphens only (no spaces, no special characters).
+For example, if the module is named "Authentication & Authorization", the file should be `authentication-authorization.md`.
+</IMPORTANT>
+
 <WORKFLOW>
 1. Analyze provided code components and module structure
 2. Explore dependencies between components if needed
-3. Generate complete {module_name}.md documentation file
+3. Generate complete {module_filename}.md documentation file
 </WORKFLOW>
 
 <AVAILABLE_TOOLS>
@@ -362,7 +372,8 @@ def format_cluster_prompt(potential_core_components: str, module_tree: dict[str,
 
 def format_system_prompt(module_name: str, custom_instructions: str = None,
                          code_context: str = None, framework_context: str = None,
-                         objectives: str = None, glossary: str = None) -> str:
+                         objectives: str = None, glossary: str = None,
+                         module_filename: str = None) -> str:
     """
     Format the system prompt with module name and optional context slots.
 
@@ -373,6 +384,7 @@ def format_system_prompt(module_name: str, custom_instructions: str = None,
         framework_context: Optional pre-wrapped framework context block (with XML tags)
         objectives: Optional objectives text (defaults to DEFAULT_OBJECTIVES)
         glossary: Optional pre-wrapped glossary block (with XML tags)
+        module_filename: Slugified filename (defaults to module_name)
 
     Returns:
         Formatted system prompt string
@@ -387,6 +399,7 @@ def format_system_prompt(module_name: str, custom_instructions: str = None,
 
     return SYSTEM_PROMPT.format(
         module_name=module_name,
+        module_filename=module_filename or module_name,
         code_context=code_context_section,
         framework_context=framework_context_section,
         objectives=objectives_text,
@@ -397,7 +410,8 @@ def format_system_prompt(module_name: str, custom_instructions: str = None,
 
 def format_leaf_system_prompt(module_name: str, custom_instructions: str = None,
                               code_context: str = None, framework_context: str = None,
-                              objectives: str = None, glossary: str = None) -> str:
+                              objectives: str = None, glossary: str = None,
+                              module_filename: str = None) -> str:
     """
     Format the leaf system prompt with module name and optional context slots.
 
@@ -408,6 +422,7 @@ def format_leaf_system_prompt(module_name: str, custom_instructions: str = None,
         framework_context: Optional pre-wrapped framework context block (with XML tags)
         objectives: Optional objectives text (defaults to DEFAULT_OBJECTIVES)
         glossary: Optional pre-wrapped glossary block (with XML tags)
+        module_filename: Slugified filename (defaults to module_name)
 
     Returns:
         Formatted leaf system prompt string
@@ -422,6 +437,7 @@ def format_leaf_system_prompt(module_name: str, custom_instructions: str = None,
 
     return LEAF_SYSTEM_PROMPT.format(
         module_name=module_name,
+        module_filename=module_filename or module_name,
         code_context=code_context_section,
         framework_context=framework_context_section,
         objectives=objectives_text,

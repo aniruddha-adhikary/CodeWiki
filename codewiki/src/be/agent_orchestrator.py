@@ -41,7 +41,7 @@ from codewiki.src.be.projection import ProjectionConfig, compile_projection_inst
 from codewiki.src.be.agent_tools.read_code_components import read_code_components_tool
 from codewiki.src.be.agent_tools.str_replace_editor import str_replace_editor_tool
 from codewiki.src.be.agent_tools.generate_sub_module_documentations import generate_sub_module_documentation_tool
-from codewiki.src.be.utils import filter_supplementary_for_module
+from codewiki.src.be.utils import filter_supplementary_for_module, slugify
 from codewiki.src.be.llm_services import create_fallback_models
 from codewiki.src.be.prompt_template import (
     format_user_prompt,
@@ -90,6 +90,7 @@ class AgentOrchestrator:
         framework_context = self.compiled.framework_context_block if self.compiled else None
         objectives = self.compiled.objectives_override if self.compiled else None
         glossary = self.glossary_block or None
+        module_filename = slugify(module_name)
 
         if is_complex_module(components, core_component_ids):
             return Agent(
@@ -107,6 +108,7 @@ class AgentOrchestrator:
                     framework_context=framework_context,
                     objectives=objectives,
                     glossary=glossary,
+                    module_filename=module_filename,
                 ),
             )
         else:
@@ -121,6 +123,7 @@ class AgentOrchestrator:
                     framework_context=framework_context,
                     objectives=objectives,
                     glossary=glossary,
+                    module_filename=module_filename,
                 ),
             )
     
@@ -164,8 +167,9 @@ class AgentOrchestrator:
             logger.info(f"✓ Overview docs already exists at {overview_docs_path}")
             return module_tree
 
-        # check if module docs already exists
-        docs_path = os.path.join(working_dir, f"{module_name}.md")
+        # check if module docs already exists (use slugified filename)
+        module_slug = slugify(module_name)
+        docs_path = os.path.join(working_dir, f"{module_slug}.md")
         if os.path.exists(docs_path):
             logger.info(f"✓ Module docs already exists at {docs_path}")
             return module_tree
@@ -201,10 +205,10 @@ class AgentOrchestrator:
             # Save updated module tree
             file_manager.save_json(deps.module_tree, module_tree_path)
 
-            # Verify documentation file was created
-            docs_path = os.path.join(working_dir, f"{module_name}.md")
-            if not os.path.exists(docs_path):
-                logger.warning(f"Agent completed but no documentation file created for {module_name} at {docs_path}")
+            # Verify documentation file was created (using slugified filename)
+            expected_path = os.path.join(working_dir, f"{module_slug}.md")
+            if not os.path.exists(expected_path):
+                logger.warning(f"Agent completed but no documentation file created for {module_name} at {expected_path}")
 
             logger.debug(f"Successfully processed module: {module_name}")
 

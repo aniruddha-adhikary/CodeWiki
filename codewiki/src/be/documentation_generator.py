@@ -26,6 +26,7 @@ from codewiki.src.config import (
     OVERVIEW_FILENAME
 )
 from codewiki.src.utils import file_manager
+from codewiki.src.be.utils import slugify
 from codewiki.src.be.agent_orchestrator import AgentOrchestrator
 
 
@@ -146,12 +147,13 @@ class DocumentationGenerator:
 
         missing_count = 0
         for child_name, child_info in module_info.items():
-            child_docs_path = os.path.join(working_dir, f"{child_name}.md")
+            child_slug = slugify(child_name)
+            child_docs_path = os.path.join(working_dir, f"{child_slug}.md")
             if os.path.exists(child_docs_path):
                 child_info["docs"] = file_manager.load_text(child_docs_path)
             else:
                 missing_count += 1
-                logger.warning(f"Module docs not found for '{child_name}' at {child_docs_path}")
+                logger.warning(f"Module docs not found for '{child_name}' (slug: {child_slug}) at {child_docs_path}")
                 child_info["docs"] = f"(Documentation for {child_name} was not generated)"
         if missing_count > 0:
             logger.warning(f"{missing_count}/{len(module_info)} child module docs missing for overview generation")
@@ -226,8 +228,9 @@ class DocumentationGenerator:
             # save final_module_tree to module_tree.json
             file_manager.save_json(final_module_tree, os.path.join(working_dir, MODULE_TREE_FILENAME))
 
-            # rename repo_name.md to overview.md
-            repo_overview_path = os.path.join(working_dir, f"{repo_name}.md")
+            # rename slugified repo_name.md to overview.md
+            repo_slug = slugify(repo_name)
+            repo_overview_path = os.path.join(working_dir, f"{repo_slug}.md")
             if os.path.exists(repo_overview_path):
                 os.rename(repo_overview_path, os.path.join(working_dir, OVERVIEW_FILENAME))
         
@@ -250,8 +253,9 @@ class DocumentationGenerator:
             logger.info(f"✓ Overview docs already exists at {overview_docs_path}")
             return module_tree
 
-        # check if parent docs already exists
-        parent_docs_path = os.path.join(working_dir, f"{module_name if len(module_path) >= 1 else OVERVIEW_FILENAME.replace('.md', '')}.md")
+        # check if parent docs already exists (use slugified filename)
+        parent_slug = slugify(module_name) if len(module_path) >= 1 else OVERVIEW_FILENAME.replace('.md', '')
+        parent_docs_path = os.path.join(working_dir, f"{parent_slug}.md")
         if os.path.exists(parent_docs_path):
             logger.info(f"✓ Parent docs already exists at {parent_docs_path}")
             return module_tree

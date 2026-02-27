@@ -9,6 +9,24 @@ import traceback
 
 logger = logging.getLogger(__name__)
 
+
+# ------------------------------------------------------------
+# ---------------------- Slug Helpers ------------------------
+# ------------------------------------------------------------
+
+def slugify(name: str) -> str:
+    """Convert a module name to a URL/filesystem-safe slug.
+
+    "Authentication & Authorization" -> "authentication-authorization"
+    "Core Services"                  -> "core-services"
+    "API & Routing (v2)"             -> "api-routing-v2"
+    """
+    s = name.lower()
+    s = re.sub(r"[^a-z0-9]+", "-", s)   # replace non-alphanumeric runs with a single hyphen
+    s = s.strip("-")                      # trim leading/trailing hyphens
+    return s
+
+
 # ------------------------------------------------------------
 # ---------------------- Complexity Check --------------------
 # ------------------------------------------------------------

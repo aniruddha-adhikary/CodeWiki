@@ -200,8 +200,14 @@ class AgentOrchestrator:
             
             # Save updated module tree
             file_manager.save_json(deps.module_tree, module_tree_path)
+
+            # Verify documentation file was created
+            docs_path = os.path.join(working_dir, f"{module_name}.md")
+            if not os.path.exists(docs_path):
+                logger.warning(f"Agent completed but no documentation file created for {module_name} at {docs_path}")
+
             logger.debug(f"Successfully processed module: {module_name}")
-            
+
             return deps.module_tree
             
         except Exception as e:

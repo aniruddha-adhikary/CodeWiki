@@ -1,3 +1,5 @@
+import json
+
 from pydantic_ai import RunContext, Tool, Agent
 
 from codewiki.src.be.agent_tools.deps import CodeWikiDeps
@@ -22,6 +24,13 @@ async def generate_sub_module_documentation(
     Args:
         sub_module_specs: The specs of the sub-modules to generate documentation for. E.g. {"sub_module_1": ["core_component_1.1", "core_component_1.2"], "sub_module_2": ["core_component_2.1", "core_component_2.2"], ...}
     """
+
+    # Guard: some LLMs send the dict as a JSON string instead of a parsed object
+    if isinstance(sub_module_specs, str):
+        try:
+            sub_module_specs = json.loads(sub_module_specs)
+        except json.JSONDecodeError:
+            return f"Error: sub_module_specs must be a valid JSON object, got string: {sub_module_specs[:200]}"
 
     deps = ctx.deps
     previous_module_name = deps.current_module_name

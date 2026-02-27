@@ -144,12 +144,17 @@ class DocumentationGenerator:
         if "children" in module_info:
             module_info = module_info["children"]
 
+        missing_count = 0
         for child_name, child_info in module_info.items():
-            if os.path.exists(os.path.join(working_dir, f"{child_name}.md")):
-                child_info["docs"] = file_manager.load_text(os.path.join(working_dir, f"{child_name}.md"))
+            child_docs_path = os.path.join(working_dir, f"{child_name}.md")
+            if os.path.exists(child_docs_path):
+                child_info["docs"] = file_manager.load_text(child_docs_path)
             else:
-                logger.warning(f"Module docs not found at {os.path.join(working_dir, f"{child_name}.md")}")
-                child_info["docs"] = ""
+                missing_count += 1
+                logger.warning(f"Module docs not found for '{child_name}' at {child_docs_path}")
+                child_info["docs"] = f"(Documentation for {child_name} was not generated)"
+        if missing_count > 0:
+            logger.warning(f"{missing_count}/{len(module_info)} child module docs missing for overview generation")
 
         return processed_module_tree
 
@@ -264,15 +269,26 @@ class DocumentationGenerator:
         
         try:
             parent_docs = call_llm(prompt, self.config)
-            
+
+            if not parent_docs:
+                raise ValueError(f"Received empty model response for module: {module_name}")
+
             # Parse and save parent documentation
-            parent_content = parent_docs.split("<OVERVIEW>")[1].split("</OVERVIEW>")[0].strip()
-            # parent_content = prompt
+            if "<OVERVIEW>" in parent_docs and "</OVERVIEW>" in parent_docs:
+                parent_content = parent_docs.split("<OVERVIEW>")[1].split("</OVERVIEW>")[0].strip()
+            else:
+                # Fallback: use the entire response if tags are missing
+                logger.warning(f"Response for {module_name} missing <OVERVIEW> tags, using raw response")
+                parent_content = parent_docs.strip()
+
+            if not parent_content:
+                raise ValueError(f"Parsed empty content for module: {module_name}")
+
             file_manager.save_text(parent_content, parent_docs_path)
-            
+
             logger.debug(f"Successfully generated parent documentation for: {module_name}")
             return module_tree
-            
+
         except Exception as e:
             logger.error(f"Error generating parent documentation for {module_name}: {str(e)}")
             logger.error(f"Traceback: {traceback.format_exc()}")
